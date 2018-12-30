@@ -45,6 +45,7 @@ end;
 begin 
     x := m; 
     y := n; 
+    read(x, y);
     call multiply;
     x := 25;
     y := 3; 
@@ -52,4 +53,5 @@ begin
     x := 84;
     y := 36;
     call gcd;
+    write(x, y);
 end.

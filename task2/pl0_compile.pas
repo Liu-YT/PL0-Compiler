@@ -1,7 +1,7 @@
 program  PL0(input, output);
 
 const
-	norw = 11;    {保留字的个数}
+	norw = 13;    {保留字的个数}
 	txmax = 100;  {标识符表长度}
 	nmax = 14;    {数字的最大位数}
 	al = 10;      {标识符的长度}
@@ -10,7 +10,7 @@ const
 	cxmax = 200;  {代码数组的大小}
 
 type
-	symbol = (nul, ident, number, plus, minus, times, slash, oddsym,
+	symbol = (nul, ident, number, plus, minus, times, slash, oddsym, readsym, writesym,
 		eql, neq, lss, leq, gtr, geq, lparen, rparen, comma, semicolon,
 		period, becomes, beginsym, endsym, ifsym, thensym,
 		whilesym, dosym, callsym, constsym, varsym, procsym );
@@ -18,11 +18,11 @@ type
 	alfa = packed array [1..al] of char;
 	myObject = (constant, variable, myProcedure);
 	symset = set of symbol;
-	fct = (lit, opr, lod, sto, cal, int, jmp, jpc); {functions}
+	fct = (lit, opr, lod, sto, cal, int, jmp, jpc, pRead, pWrite); {functions}
 	instruction = packed record
-		f : fct;  {功能码}
-		l : 0..levmax; {相对层数}
-		a : 0..amax; {相对地址}
+		f : fct;  		{功能码}
+		l : 0..levmax; 	{相对层数}
+		a : 0..amax; 	{相对地址}
 		end;
 {
 	LIT 0,a : 取常数a
@@ -32,7 +32,8 @@ type
 	CAL l,a : 调用层差为l的过程
 	INT 0,a : t寄存器增加a
 	JMP 0,a : 转移到指令地址a处
-	JPC 0,a : 条件转移到指令地址a处 
+	JPC 0,a : 条件转移到指令地址a处
+
 }
 
 var
@@ -86,15 +87,17 @@ begin
 			halt
 		end;
 		ll := 0; cc := 0; 
-		{write(oStream, cx : 5, ' ');}
+		write(oStream, cx : 5, ' ');
 		while not eoln(iStream) do
 		begin
 			ll := ll + 1; 
 			read(iStream, ch); 
-			{write(oStream, ch);}
+			write(oStream, ch);
+			
+			{一次读一行入line}
 			line[ll] := upcase(ch)
 		end;
-		{writeln(oStream); }
+		writeln(oStream); 
 		ll := ll + 1;
 		read(iStream, line[ll]);
 	end;
@@ -122,13 +125,11 @@ begin {getsym}
 				a[kk] := ' '; 
 				kk := kk-1
 			until kk = k;
-
 		id := a;  i := 1;  j := norw;
 		repeat  k := (i+j) div 2;
 			if id <= myWord[k] then j := k-1;
 			if id >= myWord[k] then i := k + 1
 		until i > j;
-
 		if i-1 > j then sym := wsym[k] 
 		else sym := ident
 	end else
@@ -285,7 +286,7 @@ var i : integer;
 begin  {列出本程序体生成的代码}
 	for i := cx0 to cx-1 do
 		with code[i] do
-			{writeln(oStream, i:3, mnemonic[f]:6, l : 3, a : 5);}
+			writeln(oStream, i:3, mnemonic[f]:6, l : 3, a : 5);
 	
 end {listcode};
 
@@ -318,25 +319,23 @@ begin {factor}
 						myProcedure : error(21)
 					end;
 			getsym
-		end else
-        	if sym = number then
-			begin
-				if num > amax then
-				begin 
-					error(30);
-					num := 0 
-				end;
-				gen(lit, 0, num); 
-				getsym
-			end else
-       			if sym = lparen then
-       			begin  
-					getsym;
-         			expression([rparen]+fsys);
-         			if sym = rparen then getsym
-         			else error(22)
-       			end;
-       			test(fsys, [lparen], 23)
+		end else if sym = number then
+		begin
+			if num > amax then
+			begin 
+				error(30);
+				num := 0 
+			end;
+			gen(lit, 0, num); 
+			getsym
+		end else if sym = lparen then
+		begin 
+			getsym;
+			expression([rparen]+fsys);
+			if sym = rparen then getsym
+			else error(22)
+		end;
+		test(fsys, [lparen], 23)
 	end
 end {factor};
   
@@ -403,73 +402,129 @@ end {condition};
 
 begin {statement}
 	if sym = ident then 
-		begin  
+	begin  
+		i := position(id);
+		if i = 0 then error(11) else
+		if table[i].kind <> variable then
+		begin {对非变量赋值} 
+			error(12); 
+			i := 0; 
+		end;
+		getsym;
+		if sym = becomes then getsym 
+		else error(13);
+		expression(fsys);
+		if i <> 0 then
+			with table[i] do gen(sto, lev-level, adr)
+	end else if sym = callsym then
+	begin  
+		getsym;
+		if sym <> ident then error(14) 
+		else
+		begin 
 			i := position(id);
-			if i = 0 then error(11) else
-			if table[i].kind <> variable then
-  			begin {对非变量赋值} 
-				error(12); 
-				i := 0; 
-			end;
+			if i = 0 then error(11) 
+			else
+				with table[i] do
+					if kind = myProcedure then 
+						gen(cal, lev-level, adr)
+					else error(15);
+			getsym
+		end
+	end else if sym = ifsym then
+	begin
+		getsym;  condition([thensym, dosym]+fsys);
+		if sym = thensym then getsym 
+		else error(16);
+		cx1 := cx;  gen(jpc, 0, 0);
+		statement(fsys);  
+		code[cx1].a := cx
+	end else if sym = beginsym then
+	begin
+		getsym;  
+		statement([semicolon, endsym]+fsys);
+		while sym in [semicolon]+statbegsys do
+		begin
+			if sym = semicolon then getsym 
+			else error(10);
+			statement([semicolon, endsym]+fsys)
+		end;
+		if sym = endsym then getsym 
+		else error(17)
+	end else if sym = whilesym then
+	begin
+		cx1 := cx;  
+		getsym;  
+		condition([dosym]+fsys);
+		cx2 := cx;  
+		gen(jpc, 0, 0);
+		if sym = dosym then getsym 
+		else error(18);
+		statement(fsys);  
+		gen(jmp, 0, cx1);  
+		code[cx2].a := cx
+	end else if sym = readsym then
+	begin
+		getsym;
+		if sym = lparen then {当前记号是变量说明语句开始符号}
+		begin  
 			getsym;
-			if sym = becomes then getsym 
-			else error(13);
-			expression(fsys);
-			if i <> 0 then
-				with table[i] do gen(sto, lev-level, adr)
+			repeat 
+				if sym = ident then 
+				begin  
+					i := position(id); 
+					{在符号表中查id, 返回id在符号表中的入口}
+					if i = 0 then error(11) else
+					{若在符号表中查不到id, 则出错, 否则做以下工作}
+					if table[i].kind <> variable then
+					{若标识符id不是变量, 则出错}
+					begin 
+						{对非变量赋值} 
+						error(12); 
+						i := 0; 
+					end else 
+						with table[i] do gen(pRead, lev-level, adr);
+					getsym;
+					if sym = comma then getsym; {如果当前记号是逗号}
+				end else 
+					error(12);
+			until sym <> ident; 
+			{跳过一些记号, 直到当前记号不是标识符(出错时才用到)}
+			if sym = rparen then getsym else error(22);
 		end else
-			if sym = callsym then
-			begin  
-				getsym;
-				if sym <> ident then error(14) 
-				else
-				begin 
-					i := position(id);
-					if i = 0 then error(11) 
-					else
-						with table[i] do
-							if kind = myProcedure then 
-								gen(cal, lev-level, adr)
-							else error(15);
-					getsym
-				end
-			end else
-				if sym = ifsym then
-				begin
-					getsym;  condition([thensym, dosym]+fsys);
-					if sym = thensym then getsym 
-					else error(16);
-					cx1 := cx;  gen(jpc, 0, 0);
-					statement(fsys);  
-					code[cx1].a := cx
-				end else
-					if sym = beginsym then
-					begin
-						getsym;  
-						statement([semicolon, endsym]+fsys);
-						while sym in [semicolon]+statbegsys do
-						begin
-							if sym = semicolon then getsym 
-							else error(10);
-							statement([semicolon, endsym]+fsys)
-						end;
-						if sym = endsym then getsym 
-						else error(17)
-					end else
-						if sym = whilesym then
-						begin
-							cx1 := cx;  
-							getsym;  
-							condition([dosym]+fsys);
-							cx2 := cx;  
-							gen(jpc, 0, 0);
-							if sym = dosym then getsym 
-							else error(18);
-							statement(fsys);  
-							gen(jmp, 0, cx1);  
-							code[cx2].a := cx
-						end;
-						test(fsys, [ ], 19)
+			error(33);
+	end else if sym = writesym then
+	begin
+		getsym;
+		if sym = lparen then {当前记号是变量说明语句开始符号}
+		begin  
+			getsym;
+			repeat 
+				if sym = ident then 
+				begin  
+					i := position(id); 
+					{在符号表中查id, 返回id在符号表中的入口}
+					if i = 0 then error(11) else
+					{若在符号表中查不到id, 则出错, 否则做以下工作}
+					if table[i].kind <> variable then
+					{若标识符id不是变量, 则出错}
+					begin 
+						{对非变量赋值} 
+						error(12); 
+						i := 0; 
+					end else 
+						with table[i] do gen(pWrite, lev-level, adr);
+					getsym;
+					if sym = comma then getsym; {如果当前记号是逗号}
+				end else 
+					error(12);
+			until sym <> ident; 
+			{跳过一些记号, 直到当前记号不是标识符(出错时才用到)}
+			if sym = rparen then getsym else error(22);
+		end else
+			error(33);
+	end; 
+	test(fsys, [ ], 19)
 end {statement};
 
 begin {block}
@@ -641,7 +696,17 @@ begin{interpret}
 				begin
 					if s[t] = 0 then p := a;
 					t := t-1
-				end
+				end;
+				pRead :
+				begin
+					read(s[base(l) + a]);
+					t := t+1
+				end;
+				pWrite :
+				begin
+					writeln(s[base(l) + a]);
+					t := t + 1
+				end;
 			end {with, case}
 	until p = 0;
 	write(oStream, 'END PL/0');
@@ -669,18 +734,22 @@ begin  {主程序}
 	myWord[3] := 'CONST     '; myWord[4] := 'DO        ';
 	myWord[5] := 'END       '; myWord[6] := 'IF        ';
 	myWord[7] := 'ODD       '; myWord[8] := 'PROCEDURE ';
-	myWord[9] := 'THEN      '; myWord[10] := 'VAR       ';
-	myWord[11] := 'WHILE     ';
+	myWord[9] := 'READ      ';
+	myWord[10] := 'THEN      '; 
+	myWord[11] := 'VAR       ';
+	myWord[12] := 'WHILE     ';
+	myWord[13] := 'WRITE     ';
 
 	{保留字的记号}
 	wsym[1] := beginsym;	wsym[2] := callsym;
 	wsym[3] := constsym;	wsym[4] := dosym;
+	wsym[5] := endsym;		wsym[6] := ifsym;
 	wsym[7] := oddsym;		wsym[8] := procsym;
-	wsym[9] := thensym; 	wsym[10] := varsym;
-	wsym[11] := whilesym;
+	wsym[9] := readsym;     wsym[10] := thensym; 	
+	wsym[11] := varsym;		wsym[12] := whilesym;   
+	wsym[13] := writesym;
 	
 	ssym['+'] := plus;		ssym['-'] := minus;
-	wsym[5] := endsym;		wsym[6] := ifsym;
 	ssym['*'] := times;		ssym['/'] := slash;
 	ssym['('] := lparen;	ssym[')'] := rparen;
 	ssym['='] := eql;		ssym[','] := comma;
@@ -692,11 +761,13 @@ begin  {主程序}
 	mnemonic[lod] := 'LOD  ';		mnemonic[sto] := 'STO  ';
 	mnemonic[cal] := 'CAL  ';		mnemonic[int] := 'INT  ';
 	mnemonic[jmp] := 'JMP  ';		mnemonic[jpc] := 'JPC  ';
+	mnemonic[pRead] := 'READ ';
+	mnemonic[pWrite] := 'WRITE';
 	
 	{中间代码指令的字符串}
 	declbegsys := [constsym, varsym, procsym];
 	{说明语句的开始符号}
-	statbegsys := [beginsym, callsym, ifsym, whilesym];
+	statbegsys := [beginsym, callsym, ifsym, whilesym, readsym, writesym];
 	{语句的开始符号}
 	facbegsys := [ident, number, lparen];
 	{因子的开始符号}
